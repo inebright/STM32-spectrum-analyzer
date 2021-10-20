@@ -36,6 +36,7 @@
 /* USER CODE BEGIN PD */
 // #define ARM_MATH_CM4
 #define ADC_BUF_LEN 4096
+#define FFT_SIZE 256
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -52,6 +53,16 @@ I2C_HandleTypeDef hi2c2;
 /* USER CODE BEGIN PV */
 uint16_t adc_buf[ADC_BUF_LEN];
 
+//FFT buffers
+float fft_in_buf[FFT_SIZE];
+float fft_out_buf[FFT_SIZE];
+float32_t fft_mag_buf[FFT_SIZE>>1];
+
+arm_rfft_fast_instance_f32 fft_handler;
+
+float real_fsample = 46785;
+uint8_t callback_state = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -62,19 +73,11 @@ static void MX_ADC1_Init(void);
 static void MX_I2C2_Init(void);
 /* USER CODE BEGIN PFP */
 void displayFFT(uint8_t *arr);
+void FFT(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
-//FFT buffers
-float fft_in_buf[2048];
-float fft_out_buf[2048];
-
-arm_rfft_fast_instance_f32 fft_handler;
-
-float real_fsample = 46785;
-uint8_t callback_state = 0;
 
 /* USER CODE END 0 */
 
@@ -118,14 +121,14 @@ int main(void)
   ssd1306_Fill(Black);
   ssd1306_UpdateScreen(&hi2c2);
 
-  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buf, ADC_BUF_LEN);
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)fft_in_buf, ADC_BUF_LEN);
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  arm_rfft_fast_init_f32(&fft_handler, 2048);
+  arm_rfft_fast_init_f32(&fft_handler, 256);
 
   while (1)
   {
@@ -133,6 +136,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+	  FFT();
 
   }
   /* USER CODE END 3 */
@@ -174,7 +178,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV4;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
@@ -202,7 +206,7 @@ static void MX_ADC1_Init(void)
   /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
   */
   hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
   hadc1.Init.ScanConvMode = DISABLE;
   hadc1.Init.ContinuousConvMode = ENABLE;
@@ -303,7 +307,13 @@ float complexABS(float real, float complex){
 	return sqrtf(real*real+complex*complex);
 }
 
-void DoFFT() {
+void FFT(void) {
+	//Do FFT
+	arm_rfft_fast_f32(&fft_handler, fft_in_buf, fft_out_buf,0);
+	/* Calculate magnitude (buffer size is half because real + imag parts are merged) */
+	arm_cmplx_mag_f32(fft_out_buf, fft_mag_buf, FFT_SIZE >> 1);
+
+	displayFFT((uint8_t*)fft_mag_buf);
 
 }
 
@@ -315,7 +325,16 @@ void displayFFT(uint8_t *arr){
 	      }
 	  }
 	  ssd1306_UpdateScreen(&hi2c2);
-	  HAL_Delay(500);
+	  HAL_Delay(50);
+}
+
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc) {
+	callback_state = 1;
+}
+
+// Called when buffer is completely filled
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
+	callback_state = 2;
 }
 
 /* USER CODE END 4 */
